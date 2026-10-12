@@ -2,6 +2,7 @@
 import argparse
 import colorsys
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -13,6 +14,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import warnings
 from urllib.parse import quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +94,7 @@ def flat_toml(text):
         d = tomllib.loads(text)
     except Exception:
         d = {}
-        for m in re.finditer(r'^\s*([A-Za-z0-9_.-]+)\s*=\s*["\']?([^"\'\n#]*#?[0-9A-Fa-fx(),. ]*)["\']?', text, re.M):
+        for m in re.finditer(r'^[ \t]*([A-Za-z0-9_.-]+)[ \t]*=[ \t]*["\']?([^"\'\n#]*#?[0-9A-Fa-fx(),. ]*)["\']?', text, re.M):
             d[m.group(1)] = m.group(2).strip()
     return d
 
@@ -190,21 +192,43 @@ def from_ghostty(text):
 
 def from_hyprland(text):
     var = {}
-    for m in re.finditer(r'^\s*\$([A-Za-z0-9_]+)\s*=\s*(.+?)\s*(?:#.*)?$', text, re.M):
-        var[m.group(1)] = m.group(2)
+    references = re.compile(r'\$([A-Za-z0-9_]+)')
+    self_referencing = set()
+    for m in re.finditer(r'^[ \t]*\$([A-Za-z0-9_]+)[ \t]*=[ \t]*(.+?)[ \t]*(?:#.*)?$', text, re.M):
+        name, value = m.group(1), m.group(2)
+        var[name] = value[:4096]
+        self_referencing.discard(name)
+        if name in references.findall(value):
+            self_referencing.add(name)
+    def expand(expr):
+        parts, remaining, end = [], 4096, 0
+        for m in references.finditer(expr):
+            value = m.group(0) if m.group(1) in self_referencing else var.get(m.group(1), '')
+            for part in (expr[end:m.start()], value):
+                parts.append(part[:remaining])
+                remaining -= len(parts[-1])
+                if not remaining:
+                    return ''.join(parts)
+            end = m.end()
+        parts.append(expr[end:][:remaining])
+        return ''.join(parts)
     def first_colour(expr):
+        expr = expr[:4096]
         for _ in range(4):
-            expr = re.sub(r'\$([A-Za-z0-9_]+)', lambda m: var.get(m.group(1), ''), expr)
+            expanded = expand(expr)
+            if expanded == expr:
+                break
+            expr = expanded
         for tok in re.findall(r'rgba?\([^)]*\)|0x[0-9a-fA-F]{6,8}|#[0-9a-fA-F]{6}', expr):
             h = hexc(tok)
             if h:
                 return h
         return None
     out = {}
-    m = re.search(r'^\s*col\.active_border\s*=\s*(.+)$', text, re.M)
+    m = re.search(r'^[ \t]*col\.active_border[ \t]*=[ \t]*(.+)$', text, re.M)
     if m:
         out['border_active'] = first_colour(m.group(1))
-    m = re.search(r'^\s*col\.inactive_border\s*=\s*(.+)$', text, re.M)
+    m = re.search(r'^[ \t]*col\.inactive_border[ \t]*=[ \t]*(.+)$', text, re.M)
     if m:
         out['border_inactive'] = first_colour(m.group(1))
     return out
@@ -447,31 +471,39 @@ def git_command(cache):
     return argv, env
 
 
-def run_git(cache, args):
+def run_git(cache, args, timeout=60):
     argv, env = git_command(cache)
     return subprocess.run(argv + [str(a) for a in args], env=env,
-                          capture_output=True, text=True, timeout=60, check=True)
+                          capture_output=True, text=True, timeout=timeout, check=True)
 
 
-def clone_repo(cache, url, dest, update=False):
+def clone_repo(cache, url, dest, update=False, timeout=60):
     dest = Path(dest)
     if dest.is_symlink():
         raise ValueError('cache repository must not be a symlink')
-    if (dest / '.git').is_dir():
-        if update:
-            run_git(cache, ['-C', dest, 'fetch', '--depth', '1', '--no-recurse-submodules', 'origin', 'HEAD'])
-            run_git(cache, ['-C', dest, 'checkout', '--force', '--detach', 'FETCH_HEAD'])
-        return
-    if dest.exists():
-        raise ValueError('cache destination already exists without Git metadata')
-    dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        run_git(cache, ['clone', '--quiet', '--depth', '1', '--filter=blob:limit=25m',
-                        '--no-recurse-submodules', '--', url, dest])
-    except (subprocess.SubprocessError, OSError):
+        if (dest / '.git').is_dir():
+            if update:
+                run_git(cache, ['-C', dest, 'fetch', '--depth', '1', '--no-recurse-submodules', 'origin', 'HEAD'],
+                        timeout=timeout)
+                run_git(cache, ['-C', dest, 'checkout', '--force', '--detach', 'FETCH_HEAD'], timeout=timeout)
+            return False
         if dest.exists():
-            shutil.rmtree(dest)
-        raise
+            raise ValueError('cache destination already exists without Git metadata')
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            run_git(cache, ['clone', '--quiet', '--depth', '1', '--filter=blob:limit=25m',
+                            '--no-recurse-submodules', '--', url, dest], timeout=timeout)
+        except (subprocess.SubprocessError, OSError):
+            if dest.exists():
+                shutil.rmtree(dest)
+            raise
+        return True
+    except subprocess.TimeoutExpired as error:
+        repo = urlsplit(url).path.strip('/')
+        command = 'list' if update else 'fetch'
+        raise ValueError('repository %s timed out after %s seconds; retry python3 tools/build.py %s '
+                         'with the same options' % (repo, timeout, command)) from error
 
 
 def commit_id(cache, tdir):
@@ -506,7 +538,7 @@ def make_list(site, omarchy):
 def list_themes(cache):
     for name, url in [('site', 'https://github.com/omacom/omarchy-site'),
                       ('omarchy', 'https://github.com/omacom/omarchy')]:
-        clone_repo(cache, url, cache / 'src' / name, update=True)
+        clone_repo(cache, url, cache / 'src' / name, update=True, timeout=900)
     catalog = make_list(cache / 'src/site', cache / 'src/omarchy')
     write_json(cache / 'list.json', catalog)
     print('listed', len(catalog['builtin']), 'built-in and', len(catalog['community']), 'community themes')
@@ -557,20 +589,22 @@ def fetch_themes(cache, only=None, limit=None, max_mb=150, jobs=6):
         if slug is None:
             return dict(entry=entry, status='skip', reason='unsupported url')
         tdir = theme_path(cache, entry)
+        cloned = False
         if not entry['builtin']:
             if tree_bytes(cache / 'themes') > 6000 * MIB:
                 return dict(entry=entry, status='skip', reason='cache-over-6GB')
             try:
-                clone_repo(cache, entry['repo'], tdir)
+                cloned = clone_repo(cache, entry['repo'], tdir)
             except (subprocess.SubprocessError, OSError, ValueError) as error:
-                return dict(entry=entry, status='fail', reason=type(error).__name__)
+                reason = str(error) if isinstance(error.__cause__, subprocess.TimeoutExpired) else type(error).__name__
+                return dict(entry=entry, status='fail', reason=reason)
         if not tdir.is_dir() or tdir.is_symlink():
             return dict(entry=entry, status='missing', reason='theme directory unavailable')
         if not within_size_cap(tdir, max_mb):
             if not entry['builtin']:
                 shutil.rmtree(tdir)
             return dict(entry=entry, status='skip', reason='over-size-cap')
-        return dict(entry=entry, status='ok', reason='cached', bytes=tree_bytes(tdir))
+        return dict(entry=entry, status='ok', reason='cloned' if cloned else 'cached', bytes=tree_bytes(tdir))
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         results = list(pool.map(fetch, entries))
     write_json(cache / 'fetch.json', results)
@@ -646,7 +680,7 @@ class ImageBackend:
         self.Image = self.ImageOps = None
         try:
             from PIL import Image, ImageOps
-            Image.MAX_IMAGE_PIXELS = 200_000_000
+            Image.MAX_IMAGE_PIXELS = 100_000_000
             self.Image, self.ImageOps = Image, ImageOps
         except ImportError:
             pass
@@ -655,9 +689,16 @@ class ImageBackend:
         self.identify = shutil.which('identify')
         self.ffmpeg, self.ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
 
+    @contextmanager
+    def open_image(self, src):
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', self.Image.DecompressionBombWarning)
+            with self.Image.open(src) as im:
+                yield im
+
     def dimensions(self, src):
         if self.Image:
-            with self.Image.open(src) as im:
+            with self.open_image(src) as im:
                 return im.width, im.height, getattr(im, 'is_animated', False)
         if self.magick or self.identify:
             cmd = [self.magick, 'identify'] if self.magick else [self.identify]
@@ -682,7 +723,7 @@ class ImageBackend:
         if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
             return None, w, h
         if self.Image:
-            with self.Image.open(src) as im:
+            with self.open_image(src) as im:
                 im = self.ImageOps.exif_transpose(im)
                 if im.mode not in ('RGB', 'RGBA'):
                     im = im.convert('RGBA' if ('A' in im.mode or 'transparency' in im.info) else 'RGB')
@@ -702,7 +743,7 @@ class ImageBackend:
 
     def thumbnail(self, src, dst, bg):
         if self.Image:
-            with self.Image.open(src) as im:
+            with self.open_image(src) as im:
                 im.seek(0)
                 im = self.ImageOps.exif_transpose(im).convert('RGBA')
                 base = self.Image.new('RGBA', im.size, bg)
@@ -734,15 +775,16 @@ def image_job(job, cache, app, backend):
         return quote(path.relative_to(app).as_posix())
     def process(kind, i, rel):
         src = tdir / rel
+        original = out / 'orig' / rel
         try:
             # Preserve original bytes inside app so cache placement cannot break O.
-            original = out / 'orig' / rel
             original.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, original)
             dst = out / ('%s%02d.webp' % (kind, i))
             display, w, h = backend.display(src, dst, url(original))
             return dict(src=display or url(dst), orig=url(original), w=w, h=h, file=src.name), src
         except Exception as error:  # Third-party decoders also raise their own exception types.
+            original.unlink(missing_ok=True)
             result['errors'].append(rel + ': ' + type(error).__name__)
             return None, None
     first = wfirst = None
@@ -908,6 +950,9 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if not shutil.which('git'):
+        print('build: git is required', file=sys.stderr)
+        return 1
     cache = Path(args.cache).expanduser().resolve()
     try:
         if args.command in ('list', 'all'):

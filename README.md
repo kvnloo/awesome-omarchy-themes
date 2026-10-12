@@ -51,6 +51,8 @@ The cache defaults to `./cache`, relative to your current directory. Set
 always goes to this repository's `app/`. Every browser image reference lives in
 `app/img/`, so the gallery works with caches in other locations.
 
+The first `list` downloads about 900 MB of catalogue repositories.
+
 `fetch` and `all` accept `--only slug,slug`, `--limit N`, `--max-mb 150`, and
 `--jobs 6`. Selection applies to built-ins and community themes, then the limit
 applies in catalog order. Unknown slugs are errors. Only the selected themes
@@ -60,7 +62,8 @@ need a separate clone.
 
 The per-theme cap measures working-tree bytes in MiB, excluding `.git` and
 symlinks. Oversized community clones are removed after cloning. This cap does
-not bound the network transfer or Git metadata. Clones have a 60-second timeout;
+not bound the network transfer or Git metadata. Community clones have a
+60-second timeout; catalogue clones and updates have a 900-second timeout;
 community fetching also skips new work when the theme cache exceeds 6,000 MiB.
 Previously fetched community repositories are reused; `list` updates the two
 catalog repositories. Failed or oversized themes are recorded as skipped. A
@@ -140,15 +143,6 @@ python3 -m unittest discover -s tests -v
 
 CI runs these tests on Python 3.11 and 3.13 for pushes and pull requests. It does
 not deploy the gallery or fetch theme repositories.
-
-All eight source gallery screenshots were inspected. Only `05-palette.png`
-is included: it shows the gallery's own colour and contrast view. The omitted
-`01-mock-1920x1080.png`, `02-dual-1920x1080.png`,
-`03-mock-portrait-1080x1920.png`, and `06-compare-split.png` contain personal mock
-session labels and wallpaper backgrounds. `04-grid.png` contains third-party
-preview thumbnails, `07-screenshot-slide.png` mainly shows an author's desktop,
-and `08-lock.png` contains a personal label over a wallpaper. The app uses generic
-mock session labels instead.
 
 ## Credits
 

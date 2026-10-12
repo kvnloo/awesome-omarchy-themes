@@ -1,12 +1,19 @@
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import struct
+import time
+import types
+import warnings
 import zlib
 import unittest
+from html.parser import HTMLParser
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -295,6 +302,8 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(len(result['previews']), 1)
         self.assertEqual(result['previews'][0]['file'], 'good.png')
         self.assertTrue(result['thumb'].endswith('good.png'))
+        self.assertFalse((self.root / 'app/img/fixture/orig/bomb.png').exists())
+        self.assertEqual((self.root / 'app/img/fixture/orig/good.png').read_bytes(), b'fixture')
 
     def test_git_disables_hooks_filters_and_submodules(self):
         argv, env = build.git_command(self.root)
@@ -307,6 +316,259 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(env['GIT_LFS_SKIP_SMUDGE'], '1')
         self.assertEqual(env['GIT_TERMINAL_PROMPT'], '0')
         self.assertEqual(env['GIT_CONFIG_NOSYSTEM'], '1')
+
+    def parse_with_deadline(self, parser, filename, text):
+        path = self.theme / filename
+        path.write_text(text)
+        script = '''
+import json
+import sys
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (256 * 1024**2, 256 * 1024**2))
+except ImportError:
+    pass
+sys.path.insert(0, sys.argv[1])
+import build
+print(json.dumps(getattr(build, sys.argv[2])(build.read_text(sys.argv[3]))))
+'''
+        started = time.monotonic()
+        try:
+            result = subprocess.run([sys.executable, '-B', '-c', script, str(ROOT / 'tools'),
+                                     parser, str(path)], capture_output=True, text=True, timeout=2)
+        except subprocess.TimeoutExpired:
+            self.fail(parser + ' did not finish within 2 seconds')
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_hyprland_self_reference_finishes_under_two_seconds(self):
+        text = '$a = ' + '$a' * 1000 + '\ncol.active_border = $a\n'
+        self.assertIsNone(self.parse_with_deadline('from_hyprland', 'hyprland.conf', text)['border_active'])
+
+    def test_hyprland_expansion_is_capped(self):
+        text = '$a = ' + 'x' * 4096 + ' rgb(123456)\ncol.active_border = $a\n'
+        self.assertIsNone(build.from_hyprland(text)['border_active'])
+        text = '$a = ' + 'x' * 1000 + '\n$b = ' + '$a' * 10 + ' rgb(123456)\n'
+        self.assertIsNone(build.from_hyprland(text + 'col.active_border = $b\n')['border_active'])
+
+    def test_hyprland_self_reference_is_not_expanded(self):
+        text = '$a = rgb(123456)$a\ncol.active_border = $a\n'
+        self.assertIsNone(build.from_hyprland(text)['border_active'])
+
+    def test_hyprland_indirect_cycle_finishes_under_two_seconds(self):
+        text = '$a = ' + '$b' * 500 + '\n$b = ' + '$a' * 500 + '\ncol.active_border = $a\n'
+        self.assertIsNone(self.parse_with_deadline('from_hyprland', 'hyprland.conf', text)['border_active'])
+
+    def test_hyprland_regular_variables_and_borders(self):
+        text = '$base = rgba(123456ff)\n$alias = $base\n'
+        text += 'col.active_border = $alias\ncol.inactive_border = rgb(abcdef)\n'
+        self.assertEqual(build.from_hyprland(text),
+                         dict(border_active='#123456', border_inactive='#abcdef'))
+        self.assertEqual(build.from_hyprland('$ab = rgb(123456)\n$a = $ab\ncol.active_border = $a\n'),
+                         dict(border_active='#123456'))
+
+    def test_colors_toml_blank_lines_finish_under_two_seconds(self):
+        # Invalid TOML forces the fallback, which otherwise is not used for blank lines.
+        for text in ('\n' * 400_000, 'invalid\n' + '\n' * 399_992):
+            with self.subTest(fallback=text.startswith('invalid')):
+                result = self.parse_with_deadline('from_colors_toml', 'colors.toml', text)
+                self.assertIsNone(result['background'])
+
+    def test_alacritty_blank_lines_finish_under_two_seconds(self):
+        for text in ('\n' * 400_000, 'invalid\n' + '\n' * 399_992):
+            with self.subTest(fallback=text.startswith('invalid')):
+                result = self.parse_with_deadline('from_alacritty', 'alacritty.toml', text)
+                self.assertIsNone(result['background'])
+
+    def test_hyprland_blank_lines_finish_under_two_seconds(self):
+        self.assertEqual(self.parse_with_deadline('from_hyprland', 'hyprland.conf', '\n' * 400_000), {})
+
+    def test_kitty_blank_lines_finish_under_two_seconds(self):
+        result = self.parse_with_deadline('from_kitty', 'kitty.conf', '\n' * 400_000)
+        self.assertIsNone(result['background'])
+
+    def test_ghostty_blank_lines_finish_under_two_seconds(self):
+        result = self.parse_with_deadline('from_ghostty', 'ghostty.conf', '\n' * 400_000)
+        self.assertIsNone(result['background'])
+
+    def test_toml_fallback_blank_lines_finish_under_two_seconds(self):
+        result = self.parse_with_deadline('flat_toml', 'colors.toml', 'invalid\n' + '\n' * 399_992)
+        self.assertEqual(result, {})
+
+    def test_git_timeout_parameter_and_clone_status(self):
+        dest = self.root / 'clone'
+        def run(argv, **kwargs):
+            self.assertEqual(kwargs['timeout'], 900)
+            if 'clone' in argv:
+                (dest / '.git').mkdir(parents=True)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        with patch.object(build.subprocess, 'run', side_effect=run):
+            self.assertTrue(build.clone_repo(self.root, 'theme-repo', dest, timeout=900))
+            self.assertFalse(build.clone_repo(self.root, 'theme-repo', dest, update=True, timeout=900))
+
+    def test_catalog_clones_use_long_timeout(self):
+        seen = []
+        def clone(cache, url, dest, **kwargs):
+            seen.append((dest.name, kwargs))
+            if dest.name == 'site':
+                build.write_json(dest / 'src/data/themes.json', [])
+            else:
+                (dest / 'themes').mkdir(parents=True)
+        with patch.object(build, 'clone_repo', side_effect=clone), contextlib.redirect_stdout(io.StringIO()):
+            build.list_themes(self.root)
+        self.assertEqual(seen, [('site', dict(update=True, timeout=900)),
+                                ('omarchy', dict(update=True, timeout=900))])
+        self.assertEqual(build.read_json(self.root / 'list.json'), dict(builtin=[], community=[]))
+
+    def test_clone_timeout_identifies_repository_and_retry(self):
+        dest = self.root / 'clone'
+        def run(argv, **kwargs):
+            dest.mkdir()
+            raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+        with patch.object(build.subprocess, 'run', side_effect=run):
+            with self.assertRaisesRegex(ValueError, 'theme-repo.*timed out.*retry'):
+                build.clone_repo(self.root, 'theme-repo', dest)
+        self.assertFalse(dest.exists())
+
+    def test_catalog_timeout_cli_gives_retry_command(self):
+        stderr = io.StringIO()
+        with patch.object(build.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 900)), \
+             contextlib.redirect_stderr(stderr):
+            status = build.main(['list', '--cache', str(self.root)])
+        self.assertEqual(status, 1)
+        self.assertIn('omacom/omarchy-site', stderr.getvalue())
+        self.assertIn('timed out', stderr.getvalue())
+        self.assertIn('retry', stderr.getvalue())
+        self.assertIn('python3 tools/build.py list', stderr.getvalue())
+
+    def test_fetch_timeout_identifies_repository_and_retry(self):
+        cache = self.root / 'cache'
+        build.write_json(cache / 'list.json', dict(builtin=[], community=[
+            dict(slug=s, name=s, author='Example', repo=s + '-repo') for s in ('slow', 'cached')]))
+        (cache / 'themes/cached/.git').mkdir(parents=True)
+        def run(argv, **kwargs):
+            Path(argv[-1]).mkdir()
+            raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+        output = io.StringIO()
+        with patch.object(build.subprocess, 'run', side_effect=run), contextlib.redirect_stdout(output):
+            build.fetch_themes(cache, jobs=1)
+        self.assertIn('slow-repo timed out after 60 seconds', output.getvalue())
+        self.assertIn('retry python3 tools/build.py fetch', output.getvalue())
+        self.assertIn('cached ok cached', output.getvalue())
+        self.assertFalse((cache / 'themes/slow').exists())
+
+    def test_fetch_reports_cloned_then_cached(self):
+        cache = self.root / 'cache'
+        build.write_json(cache / 'list.json', dict(builtin=[], community=[
+            dict(slug='fixture', name='Fixture', author='Example', repo='theme-repo')]))
+        def run(argv, **kwargs):
+            (Path(argv[-1]) / '.git').mkdir(parents=True)
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        fresh, cached = io.StringIO(), io.StringIO()
+        with patch.object(build.subprocess, 'run', side_effect=run):
+            with contextlib.redirect_stdout(fresh):
+                build.fetch_themes(cache)
+            with contextlib.redirect_stdout(cached):
+                build.fetch_themes(cache)
+        self.assertEqual(fresh.getvalue(), 'fixture ok cloned\n')
+        self.assertEqual(cached.getvalue(), 'fixture ok cached\n')
+
+    def test_missing_git_fails_before_every_command(self):
+        for command in ('list', 'fetch', 'palettes', 'images', 'data', 'check', 'all'):
+            with self.subTest(command=command):
+                cache = self.root / 'absent'
+                stderr = io.StringIO()
+                with patch.object(build.shutil, 'which', return_value=None), \
+                     patch.object(build.subprocess, 'run', side_effect=FileNotFoundError('git')), \
+                     contextlib.redirect_stderr(stderr):
+                    status = build.main([command, '--cache', str(cache)])
+                self.assertEqual(status, 1)
+                self.assertEqual(stderr.getvalue(), 'build: git is required\n')
+                self.assertFalse(cache.exists())
+
+    def test_image_bomb_warning_is_a_per_image_failure(self):
+        class BombWarning(UserWarning):
+            pass
+        fake_image = types.SimpleNamespace(DecompressionBombWarning=BombWarning)
+        def open_image(src):
+            if src.name == 'bomb.png':
+                warnings.warn('too many pixels', BombWarning)
+            return contextlib.nullcontext(types.SimpleNamespace(width=1, height=1, is_animated=False))
+        fake_image.open = open_image
+        fake_pil = types.ModuleType('PIL')
+        fake_pil.Image, fake_pil.ImageOps = fake_image, types.SimpleNamespace()
+        with patch.dict(sys.modules, {'PIL': fake_pil}):
+            backend = build.ImageBackend()
+        (self.theme / 'bomb.png').write_bytes(b'fixture')
+        (self.theme / 'good.png').write_bytes(b'fixture')
+        job = dict(slug='fixture', tdir='theme', previews=['bomb.png', 'good.png'], walls=[], bg='#000000')
+        with warnings.catch_warnings(record=True) as caught, \
+             patch.object(backend, 'thumbnail', return_value=False):
+            warnings.simplefilter('always', BombWarning)
+            result = build.image_job(job, self.root, self.root / 'app', backend)
+        self.assertEqual(caught, [])
+        self.assertEqual(result['errors'], ['bomb.png: BombWarning'])
+        self.assertEqual([p['file'] for p in result['previews']], ['good.png'])
+        self.assertFalse((self.root / 'app/img/fixture/orig/bomb.png').exists())
+        self.assertEqual(fake_image.MAX_IMAGE_PIXELS, 100_000_000)
+        src, dst = self.theme / 'bomb.png', self.root / 'display.webp'
+        with self.assertRaises(BombWarning):
+            backend.thumbnail(src, dst, '#000000')
+        with patch.object(backend, 'dimensions', return_value=(3000, 3000, False)), \
+             self.assertRaises(BombWarning):
+            backend.display(src, dst, 'original.png')
+
+    def test_pillow_rejects_over_one_hundred_million_pixels(self):
+        backend = build.ImageBackend()
+        if backend.Image is None:
+            self.skipTest('optional Pillow is unavailable')
+        # A tiny BMP header declares a large image without allocating its pixels.
+        header = struct.pack('<2sIHHI', b'BM', 54, 0, 0, 54)
+        header += struct.pack('<IiiHHIIiiII', 40, 10001, 10000, 1, 24, 0, 0, 0, 0, 0, 0)
+        src = self.theme / 'bomb.bmp'
+        src.write_bytes(header)
+        with self.assertRaises(backend.Image.DecompressionBombWarning):
+            backend.dimensions(src)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to exercise gallery HTML')
+    def test_gallery_escapes_theme_values_in_html(self):
+        script = r'''
+const fs = require('fs'), vm = require('vm');
+function node(tag) {
+  return { tag, innerHTML: '', children: [], dataset: {}, style: { setProperty() {} },
+           appendChild(child) { this.children.push(child); } };
+}
+const cards = node('cards');
+const document = { createElement: node, createDocumentFragment: () => node('fragment'),
+                   getElementById: () => cards };
+const attack = '#112233" data-injected="yes"><img data-injected="yes">';
+const palette = Object.fromEntries(['bg', 'fg', 'ac', 'cur', 'sel', 'selfg', 'mu', 'ab', 'ib',
+                                   'bg2', 'bg0', 'fgb', 'fgd'].map(k => [k, attack]));
+palette.n = palette.b = Array(8).fill(attack);
+const theme = { slug: 'fixture', name: attack, author: attack, thumb: attack, mode: attack,
+                videos: attack, p: palette, format: attack, repo: attack, srcs: [attack],
+                lic: attack, commit: attack, guessed: [attack], derived: [attack], walls: [] };
+const window = { GALLERY: { themes: [theme] } };
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const prefix = source.slice(0, source.indexOf('  function sorted(list)'));
+vm.runInNewContext(prefix + '\nwindow.test = {buildCards, paletteView};})();', {window, document});
+window.test.buildCards();
+const paletteView = node('view');
+window.test.paletteView(paletteView, theme);
+const html = [];
+function collect(n) { if (n.innerHTML) html.push(n.innerHTML); n.children.forEach(collect); }
+collect(cards); collect(paletteView);
+console.log(JSON.stringify(html));
+'''
+        result = subprocess.run(['node', '-e', script, str(ROOT / 'app/gallery.js')],
+                                capture_output=True, text=True, check=True, timeout=5)
+        class Markup(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                self_outer.assertNotIn('data-injected', dict(attrs))
+        self_outer = self
+        for html in json.loads(result.stdout):
+            Markup().feed(html)
 
 
 if __name__ == '__main__':

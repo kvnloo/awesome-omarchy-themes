@@ -284,7 +284,7 @@
   var ANSI = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
   function swatch(label, hex, bg, note) {
     var r = contrast(hex, bg), ra = rating(r);
-    var b = el('button', '', '<span class="swc" style="background:' + hex + '"></span><span class="lbl"><b>' + esc(label) + '</b>' + hex +
+    var b = el('button', '', '<span class="swc" style="background:' + esc(hex) + '"></span><span class="lbl"><b>' + esc(label) + '</b>' + esc(hex) +
       '<i><span class="r ' + ra[1] + '">' + r.toFixed(2) + ':1</span> ' + (note || ra[0]) + '</i></span>');
     b.title = 'Copy ' + hex; b.dataset.copy = hex;
     return b;
@@ -292,10 +292,10 @@
   function paletteView(v, t) {
     var p = t.p, s = el('div', 'sheet');
     var fgbg = contrast(p.fg, p.bg);
-    var meta = ['<span>fg on bg <b>' + fgbg.toFixed(2) + ':1 ' + rating(fgbg)[0] + '</b></span>', '<span>mode <b>' + t.mode + '</b></span>',
+    var meta = ['<span>fg on bg <b>' + fgbg.toFixed(2) + ':1 ' + rating(fgbg)[0] + '</b></span>', '<span>mode <b>' + esc(t.mode) + '</b></span>',
       '<span>format <b>' + esc(t.format) + '</b></span>', '<span>palette from <b>' + esc(t.srcs.join(' + ') || 'nothing') + '</b></span>',
       '<span>licence <b>' + esc(t.lic || 'none found') + '</b></span>', '<span>commit <b>' + esc(t.commit || '?') + '</b></span>',
-      '<span>' + t.walls.length + ' wallpapers' + (t.videos ? ', ' + t.videos + ' videos (not shown)' : '') + '</span>'];
+      '<span>' + t.walls.length + ' wallpapers' + (t.videos ? ', ' + esc(t.videos) + ' videos (not shown)' : '') + '</span>'];
     if (t.guessed.length) meta.push('<span class="bad">guessed: ' + esc(t.guessed.join(', ')) + '</span>');
     if (t.derived.length) meta.push('<span>derived: ' + esc(t.derived.join(', ')) + '</span>');
     s.appendChild(el('h1', '', esc(t.name) + '<small>' + esc(t.author) + ' &middot; ' + esc(t.repo.replace(/^https?:[/][/]/, '')) + '</small>'));
@@ -315,7 +315,7 @@
     [['Body text', p.fg, p.bg], ['Selected text', p.selfg, p.sel], ['On accent (active item)', p.bg, p.ac], ['Dim text', p.fgd, p.bg],
       ['Muted / comments', p.b[0], p.bg], ['Error text', p.n[1], p.bg], ['Text on lighter background', p.fg, p.bg2], ['Cursor block', p.bg, p.cur]
     ].forEach(function (c) {
-      var r = contrast(c[1], c[2]), d = el('div', 'pair', 'The quick brown fox 0123<small>' + c[0] + ' &middot; ' + c[1] + ' on ' + c[2] + ' &middot; ' + r.toFixed(2) + ':1 ' + rating(r)[0] + '</small>');
+      var r = contrast(c[1], c[2]), d = el('div', 'pair', 'The quick brown fox 0123<small>' + c[0] + ' &middot; ' + esc(c[1]) + ' on ' + esc(c[2]) + ' &middot; ' + r.toFixed(2) + ':1 ' + rating(r)[0] + '</small>');
       d.style.color = c[1]; d.style.background = c[2]; pairs.appendChild(d);
     });
     s.appendChild(pairs);
@@ -524,8 +524,8 @@
     var wrap = $('cards'), frag = document.createDocumentFragment();
     T.forEach(function (t) {
       var c = el('div', 'card'); c.dataset.i = t.i; c.style.setProperty('--bg', t.p.bg);
-      var strip = [t.p.bg, t.p.fg, t.p.ac, t.p.n[1], t.p.n[2], t.p.n[3], t.p.n[4], t.p.n[5], t.p.n[6]].map(function (h) { return '<i style="background:' + h + '"></i>'; }).join('');
-      c.innerHTML = (t.thumb ? '<img class="th" loading="lazy" decoding="async" alt="" src="' + t.thumb + '">' : '<div class="th"></div>') +
+      var strip = [t.p.bg, t.p.fg, t.p.ac, t.p.n[1], t.p.n[2], t.p.n[3], t.p.n[4], t.p.n[5], t.p.n[6]].map(function (h) { return '<i style="background:' + esc(h) + '"></i>'; }).join('');
+      c.innerHTML = (t.thumb ? '<img class="th" loading="lazy" decoding="async" alt="" src="' + esc(t.thumb) + '">' : '<div class="th"></div>') +
         '<div class="strip">' + strip + '</div><div class="nm"><b>' + esc(t.name) + '</b><span>' + esc(t.author) + '</span></div>' +
         '<div class="bd">' + (t.mode === 'light' ? '<span>light</span>' : '') + (t.builtin ? '<span>built-in</span>' : '') + (t.format.indexOf('4.x') === 0 ? '' : '<span>' + (t.format.indexOf('legacy') === 0 ? 'legacy' : '3.x') + '</span>') + '</div>' +
         '<button class="st' + (favs[t.slug] ? ' on' : '') + '" title="Star">' + (favs[t.slug] ? '★' : '☆') + '</button>';

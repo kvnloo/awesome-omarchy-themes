@@ -1,35 +1,28 @@
-# Omarchy theme preview gallery
+# awesome-omarchy-themes
 
-A local, static fullscreen gallery for Omarchy desktop themes. Browse screenshots,
-wallpapers, a mock desktop drawn from each theme's palette, a mock lock screen,
-and colour sheets with contrast ratios. Search, compare themes, preview two
-monitors, and keep a starred list in your browser.
+Browse, compare and rank Omarchy desktop themes in a local gallery with palette previews, filters and interactive statistics.
 
-![The gallery's own palette and contrast view](docs/screenshots/05-palette.png)
+## Screenshots
+
+The gallery's own palette and contrast view:
+
+![Palette swatches and contrast ratios in the gallery](docs/screenshots/05-palette.png)
 
 ## Quick start
 
-Install Python 3.11 or newer and Git, then run from the repository root:
+Install Python 3.11 or newer and Git, then clone and build:
 
 ```sh
-python3 tools/build.py all
+git clone https://github.com/kvnloo/awesome-omarchy-themes.git
+cd awesome-omarchy-themes
+python3 tools/build.py all --cache-max-mb 20000
 ```
 
-Open `app/index.html` in your browser. No web server is needed. The build needs
-network access; the generated gallery makes no network requests.
+Open `app/index.html` in your browser. The build fetches themes from their authors' repositories; the generated app works offline from `file://` with no server or network requests.
 
-For a smaller first build:
+Python's standard library is enough. Pillow optionally generates thumbnails and smaller display images; ImageMagick or ffmpeg can also resize them. Without an image backend, the browser displays local originals.
 
-```sh
-python3 tools/build.py all --only tokyo-night,catppuccin,gruvbox --cache ./cache
-```
-
-Python's standard library is enough to build. If Pillow is installed, it makes
-480x270 thumbnails and display copies up to 2560 pixels, using the original image
-for small or animated files. ImageMagick or ffmpeg with ffprobe can provide an
-alternative image backend. Without a decoder, the gallery uses local original
-images and lets the browser decode them; there is no resizing. Pillow preserves
-the original pipeline's image transforms most closely.
+Themes, wallpapers and screenshots belong to their authors. They are fetched from their repositories at build time into a git-ignored cache, not redistributed in this repository. See each theme's licence for its terms.
 
 ## Build commands
 
@@ -122,13 +115,21 @@ produce an empty stats cache and the gallery remains usable.
 
 ## Rankings, filters and charts
 
-Popularity is the default. With statistics, its score combines logarithmic stars
-and forks, curated list membership and six-month update recency. Built-ins score
-100. Without statistics it combines lists and commit recency, and star-dependent
-controls disappear. The other rankings are Stars, Trending, Recently updated,
-Newest, Completeness, Wallpapers, Legibility, Colourfulness and Uniqueness.
-Name and Accent hue provide plain ordering. Each ranking has an explanation;
-missing values stay below the No data divider even in reverse order.
+Popularity is the default. With GitHub statistics, the score is:
+
+```text
+100 × (0.70 × stars + 0.05 × forks + 0.10 × lists + 0.15 × recency)
+stars   = min(1, ln(1 + star count) / ln(151))
+forks   = min(1, ln(1 + fork count) / ln(21))
+lists   = min(1, (2 × official membership + curated list count) / 6)
+recency = 0.5 ^ (months since last push / 6)
+```
+
+The cache's statistics date anchors recency, with months measured as 30.44 days. Stars carry most of the weight; card tooltips show stars, forks, lists and last push. Press I for the weighted score breakdown. With no token or statistics, popularity uses `100 × (0.6 × lists + 0.4 × commit recency)` and star-dependent controls disappear.
+
+Built-ins have no repository statistics. Popularity, Stars, Trending, Newest and Recently updated put them in a separate collapsible "Built into Omarchy" section, with no score or rank. Its open state is remembered. Community ranks start at 1. Built-ins participate normally in all palette, completeness, wallpaper, name and hue rankings.
+
+Trending divides stars plus one by repository age in months plus three. Newest uses creation dates; Recently updated uses the last push or cached commit date. Completeness measures authored palette keys, app coverage, previews, wallpapers and licensing. Wallpapers sorts by count and uses resolution to break ties. Legibility measures the worst foreground or terminal colour contrast against the background. Colourfulness measures mean OKLCH chroma; Uniqueness measures distance to the nearest palette. Name and Accent hue provide plain ordering. Missing values stay below the No data divider, including in reverse order. Ties break by display name, then slug.
 
 Filter kinds combine with AND, and values within a kind combine with OR. Filter
 by mode, accent family, background lightness, contrast, terminal legibility,
@@ -157,11 +158,11 @@ The Stats view follows the same filters. It includes summary numbers, a hue
 wheel, a palette quilt with a true-position toggle, background lightness against
 text contrast, the current ranking's leaderboard, monthly publication counts,
 six terminal colour histograms and every accent name in the selection. Built-ins
-are left out of the popularity leaderboard and outlined in the palette quilt.
+are left out of repository-based leaderboards and outlined in the compact palette quilt. The True positions toggle restores PCA coordinates and enables region brushing. Click quilt tiles to open individual themes.
 Marks have hover and focus tooltips; click a theme to open it, or click an aggregate or brush a region to
 filter the gallery. Every card has a table fallback. Monthly counts require
-GitHub statistics. PCA coordinates, quilt cells and ranking metrics are computed
-at build time; charts bin and count the current slice locally.
+GitHub statistics. PCA coordinates and ranking metrics are computed at build time. The quilt packs
+the current selection locally; charts bin and count that same filtered slice.
 
 ## Keys
 
@@ -244,6 +245,18 @@ python3 -m unittest discover -s tests -v
 CI runs these tests on Python 3.11 and 3.13 for pushes and pull requests. It does
 not deploy the gallery or fetch theme repositories.
 
+To verify a cached build with GitHub statistics in headless Chromium, use
+Node.js with the built-in WebSocket API and `/usr/bin/chromium`:
+
+```sh
+TMPDIR=/path/to/build/_check/tmp node tools/check_polish.mjs /path/to/build
+```
+
+The build directory must contain `app/`. The script checks rankings, controls,
+charts and mobile layout, then writes 1920×1080 screenshots and a JSON report
+under `_check/polish/`. It blocks external hosts and keeps its browser profile
+in `TMPDIR`.
+
 ## Credits
 
 Thanks to [Omarchy](https://github.com/omacom/omarchy) and the theme authors.
@@ -251,9 +264,9 @@ The catalog comes from [Omarchy's official theme list](https://omarchy.org/theme
 and [its site repository](https://github.com/omacom/omarchy-site). Theme names,
 authors, repository links and source revisions are retained in generated data.
 
-## NOTICE
+## Licence and theme ownership
 
-Themes, wallpapers and screenshots belong to their authors. The build downloads
+The gallery code is [MIT licensed](LICENSE). Themes, wallpapers and screenshots belong to their authors. The build downloads
 them into a git-ignored cache and creates local, git-ignored image copies for
 viewing. They are not redistributed in this repository and are not covered by
 this repository's MIT licence. Refer to each theme's own licence and author for

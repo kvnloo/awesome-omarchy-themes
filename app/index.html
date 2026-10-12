@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Theme Preview</title>
+<title>awesome-omarchy-themes</title>
 <link rel="stylesheet" href="gallery.css">
 </head>
 <body>
@@ -46,16 +46,18 @@
     <div class="seg" id="fMode">
       <button data-v="all" class="on">All</button><button data-v="dark">Dark</button><button data-v="light">Light</button>
     </div>
-    <label class="tog"><input type="checkbox" id="fFav"> Favourites only</label>
-    <label class="sel">Sort
-      <select id="fSort" aria-label="Ranking"></select>
-    </label>
+    <button id="fFav" class="favourite-toggle" aria-pressed="false"><span aria-hidden="true">☆</span> Favourites only</button>
+    <div class="rank-control">
+      <button id="fSort" aria-label="Ranking" aria-haspopup="menu" aria-expanded="false" aria-controls="rankMenu"></button>
+      <div id="rankMenu" role="menu" aria-label="Rank themes" hidden></div>
+    </div>
     <span id="gCount"></span>
     <button id="gStats">Stats (V)</button>
     <button id="gFavs">Starred list (S)</button>
     <button id="gClose">Close (Esc)</button>
+    <button id="moreFilters" aria-expanded="false" aria-controls="filterControls">More filters <span aria-hidden="true">⌄</span></button>
     <span id="sortExplanation"></span>
-    <details id="filterDetails"><summary>More filters</summary><div id="filterControls"></div></details>
+    <div id="filterDetails" hidden><div id="filterControls"></div></div>
     <div id="activeFilters" aria-label="Active filters"></div>
   </header>
   <div id="cards" tabindex="-1"></div>

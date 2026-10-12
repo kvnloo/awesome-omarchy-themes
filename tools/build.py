@@ -990,17 +990,17 @@ def metrics(themes, stats):
         R = 0.5 ** (age / 6) if age is not None else 0
         trend = None
         if theme.get('builtin'):
-            pop = 100
+            pop = None
         elif has_stats:
             S = min(1, math.log1p(row['stars']) / math.log(151)) if row else 0
             F = min(1, math.log1p(row['forks']) / math.log(21)) if row else 0
-            pop = 100 * (0.5*S + 0.1*F + 0.2*M + 0.2*R)
+            pop = 100 * (0.70*S + 0.05*F + 0.10*M + 0.15*R)
             born = months(row.get('created')) if row else None
             if born is not None:
                 trend = (row['stars'] + 1) / (born + 3)
         else:
             pop = 100 * (0.6*M + 0.4*R)
-        theme['m'], theme['r'] = m, dict(pop=round(pop, 1), trend=round(trend, 1) if trend is not None else None)
+        theme['m'], theme['r'] = m, dict(pop=round(pop, 1) if pop is not None else None, trend=round(trend, 1) if trend is not None else None)
         vectors.append(palette_vector(theme))
     nearest = [math.inf] * len(vectors)
     for i, vector in enumerate(vectors):
@@ -1549,6 +1549,34 @@ def read_data(path):
     return json.loads(match.group(1))
 
 
+def display_names(themes):
+    names = {}
+    for theme in themes:
+        name = theme['name'].strip()
+        if re.sub(r'[^a-z]', '', name.lower()) in ('omarchy', 'omarchytheme', 'theme'):
+            stem = re.sub(r'^omarchy-|^theme-|(?:-omarchy)?-theme$|(?:-omarchy)$', '', theme['slug'])
+            if stem.lower() in ('omarchy', 'theme', ''):
+                stem = re.sub(r'dev$', '', theme['author'], flags=re.I) or theme['author']
+            name = ' '.join(word.capitalize() for word in re.split(r'[-_]', stem) if word)
+        names[theme['slug']] = name
+    counts = {}
+    for name in names.values():
+        counts[name.casefold()] = counts.get(name.casefold(), 0) + 1
+    qualified = {theme['slug']: names[theme['slug']] + (' · ' + theme['author']
+                 if counts[names[theme['slug']].casefold()] > 1 else '') for theme in themes}
+    variants = {}
+    for name in qualified.values():
+        variants[name.casefold()] = variants.get(name.casefold(), 0) + 1
+    for theme in themes:
+        if variants[qualified[theme['slug']].casefold()] > 1:
+            identity = repo_identity(theme.get('repo', ''))
+            stem = identity[1].split('/', 1)[1] if identity else theme['slug']
+            stem = re.sub(r'^omarchy-|^theme-|(?:-omarchy)?-theme$|(?:-omarchy)$', '', stem)
+            title = ' '.join(word.capitalize() for word in re.split(r'[-_]', stem) if word)
+            qualified[theme['slug']] = title + ' · ' + theme['author']
+    return qualified
+
+
 def data(cache, app=APP):
     idx = read_json(cache / 'index.json')
     pals = read_json(cache / 'palettes.json')['palettes']
@@ -1558,6 +1586,7 @@ def data(cache, app=APP):
         theme['palette'] = pals[theme['slug']]
     viz = metrics(idx['themes'], stats_data)
     out = []
+    names = display_names(idx['themes'])
     for theme in idx['themes']:
         pal, im = pals[theme['slug']], imgs[theme['slug']]
         row = theme.get('stats')
@@ -1570,7 +1599,7 @@ def data(cache, app=APP):
         wmp = max((image['w'] * image['h'] / 1_000_000 for image in im['walls']
                    if image.get('w') and image.get('h')), default=0)
         out.append(dict(
-            slug=theme['slug'], name=theme['name'], author=theme['author'], repo=theme['repo'],
+            slug=theme['slug'], name=names[theme['slug']], author=theme['author'], repo=theme['repo'],
             builtin=theme['builtin'], format=theme['format'], src=pal['source'], srcs=pal['sources_used'],
             guessed=pal['guessed'], derived=pal['derived'], mode=pal['mode'],
             lic=detected or ('file: ' + theme['licence_file'] if theme['licence_file'] else None),

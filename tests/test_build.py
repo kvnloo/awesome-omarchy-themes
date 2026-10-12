@@ -774,11 +774,11 @@ console.log(JSON.stringify({cap:pipeline({col:'ff79c6',sort:'similar'}).length,
         themes = self.themes()
         build.metrics(themes, self.statistics())
         builtin, official, found = themes
-        self.assertEqual(builtin['r']['pop'], 100)
+        self.assertIsNone(builtin['r']['pop'])
         self.assertIsNone(builtin['r']['trend'])
         self.assertAlmostEqual(official['r']['pop'], 100, places=1)
         self.assertAlmostEqual(official['r']['trend'], 151 / 3, delta=.06)
-        self.assertAlmostEqual(found['r']['pop'], 20, places=1)
+        self.assertAlmostEqual(found['r']['pop'], 15, places=1)
         self.assertAlmostEqual(found['r']['trend'], 1 / 3, delta=.06)
         self.assertIsNone(builtin['stats'])
         self.assertEqual(official['stats']['stars'], 150)
@@ -799,7 +799,7 @@ console.log(JSON.stringify({cap:pipeline({col:'ff79c6',sort:'similar'}).length,
     def test_rankings_without_stats_use_list_and_commit_recency(self):
         themes = self.themes()
         build.metrics(themes, dict(fetched='2026-10-12', source='none', repos={}))
-        self.assertEqual([t['r']['pop'] for t in themes], [100, 100, 40])
+        self.assertEqual([t['r']['pop'] for t in themes], [None, 100, 40])
         self.assertTrue(all(t['r']['trend'] is None for t in themes))
         themes[2]['last_commit'] = '2025-10-12'
         build.metrics(themes, dict(fetched='2026-10-12', source='none', repos={}))
@@ -811,12 +811,73 @@ console.log(JSON.stringify({cap:pipeline({col:'ff79c6',sort:'similar'}).length,
         stats = self.statistics()
         stats['repos']['example/official'].update(stars=15, forks=2, created='2026-01-12', pushed='2026-04-12')
         build.metrics(themes, stats)
-        self.assertAlmostEqual(themes[1]['r']['pop'], 51.2252323, delta=.06)
+        self.assertAlmostEqual(themes[1]['r']['pop'], 52.9868177, delta=.06)
         self.assertAlmostEqual(themes[1]['r']['trend'], 1.3368467, delta=.06)
         stats['repos']['example/official'].update(stars=999, forks=999, pushed='2026-10-12')
         themes[1]['lists'] = ['official', 'manual', 'awesome-a', 'awesome-w', 'hub-l']
         build.metrics(themes, stats)
         self.assertEqual(themes[1]['r']['pop'], 100, 'stars and forks are capped before combining signals')
+
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to exercise gallery rankings')
+    def test_builtin_pinning_rank_numbers_and_collapsed_grid_layout(self):
+        script = r"""
+const fs=require('fs'),vm=require('vm');
+const themes=[{slug:'builtin',name:'Built in',builtin:true,lc:'2026-10-12',r:{pop:100,trend:99},st:{s:999,c:'2026-01-01'},m:{comp:95}},
+{slug:'a',name:'A',builtin:false,r:{pop:90},st:{s:169},m:{comp:90}},
+{slug:'b',name:'B',builtin:false,r:{pop:80},st:{s:100},m:{comp:99}}];
+const wrap={clientWidth:1200},document={createElement:()=>({}),getElementById:()=>wrap},window={GALLERY:{themes,stats:{source:'github-graphql'}}};
+const source=fs.readFileSync(process.argv[1],'utf8'),prefix=source.slice(0,source.indexOf('  /* ---------- shared chart anatomy and interactions ---------- */'));
+vm.runInNewContext(prefix+'\nwindow.test={isPinned,rankValue,rankNumber,rankDescription,sorted,layoutCards,S,ui,positions:()=>cardPositions};})();',{window,document});
+const a=window.test,values=['pop','stars','trend','new','updated'].map(k=>a.rankValue(themes[0],k));
+a.S.order=a.sorted([0,1,2],{sort:'pop'},{});a.S.filter.sort='pop';a.layoutCards();
+const collapsed=a.positions().filter(Boolean).length;
+a.ui.builtinsOpen=true;a.layoutCards();
+console.log(JSON.stringify({values,rank:a.rankNumber(themes[1]),description:a.rankDescription(themes[0]),collapsed,expanded:a.positions().filter(Boolean).length,
+reverse:a.sorted([0,1,2],{sort:'-pop'},{}),complete:a.sorted([0,1,2],{sort:'complete'},{}),completeValue:a.rankValue(themes[0],'complete')}));
+"""
+        result = subprocess.run(['node', '-e', script, str(ROOT / 'app/gallery.js')],
+                                capture_output=True, text=True, check=True, timeout=5)
+        self.assertEqual(json.loads(result.stdout), dict(values=[None]*5, rank=1,
+                         description='Built into Omarchy', collapsed=2, expanded=3,
+                         reverse=[0,2,1], complete=[2,0,1], completeValue=95))
+
+    def test_most_starred_theme_is_in_top_three_by_popularity(self):
+        themes = [dict(self.themes()[2], slug='rank-%d' % i,
+                       repo='https://github.com/example/rank-%d' % i,
+                       lists=['official', 'manual', 'awesome-a', 'awesome-w', 'hub-l'])
+                  for i in range(12)]
+        stats = self.statistics()
+        stats['repos'] = {'example/rank-%d' % i: dict(stars=40, forks=20,
+                          created='2026-01-12', pushed='2026-10-12') for i in range(12)}
+        stats['repos']['example/rank-0'].update(stars=169, forks=0, pushed='2026-09-12')
+        themes[0]['lists'] = []
+        build.metrics(themes, stats)
+        ranked = sorted(themes, key=lambda t: -t['r']['pop'])
+        self.assertIn(themes[0], ranked[:3])
+
+    def test_display_names_fix_generic_names_and_qualify_twins_without_slug_changes(self):
+        themes = [dict(slug='omarchy', name='Omarchy', author='dracula', builtin=False),
+                  dict(slug='theme', name='Omarchy Theme', author='zavudev', builtin=False),
+                  dict(slug='nord', name='Nord', author='Omarchy (built-in)', builtin=True),
+                  dict(slug='nord-owner', name='Nord', author='owner', builtin=False),
+                  dict(slug='omarchy-sunset-theme', name='Omarchy Theme', author='else', builtin=False)]
+        originals = copy.deepcopy(themes)
+        names = build.display_names(themes)
+        self.assertEqual(names['omarchy'], 'Dracula')
+        self.assertEqual(names['theme'], 'Zavu')
+        self.assertEqual(names['nord'], 'Nord · Omarchy (built-in)')
+        self.assertEqual(names['nord-owner'], 'Nord · owner')
+        self.assertEqual(names['omarchy-sunset-theme'], 'Sunset')
+        self.assertEqual(themes, originals)
+        self.assertEqual(names, build.display_names(list(reversed(themes))))
+
+    def test_display_names_distinguish_variants_by_the_same_author(self):
+        themes = [dict(slug='infernium', name='Infernium', author='maker',
+                       repo='https://github.com/maker/omarchy-infernium-theme'),
+                  dict(slug='infernium-dark', name='Infernium', author='maker',
+                       repo='https://github.com/maker/omarchy-infernium-dark-theme')]
+        self.assertEqual(build.display_names(themes), {'infernium':'Infernium · maker',
+                         'infernium-dark':'Infernium Dark · maker'})
 
     def test_pca_and_quilt_are_deterministic_under_shuffle(self):
         original = self.themes()

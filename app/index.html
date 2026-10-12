@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theme Preview</title>
+<link rel="stylesheet" href="gallery.css">
+</head>
+<body>
+<div id="stage">
+  <div class="pane" id="paneA"></div>
+  <div class="pane" id="paneB" hidden></div>
+  <div id="divider" hidden></div>
+</div>
+
+<button class="edge left" id="edgeL" aria-label="Previous theme"><span>&#x2039;</span></button>
+<button class="edge right" id="edgeR" aria-label="Next theme"><span>&#x203A;</span></button>
+
+<footer id="hud">
+  <button id="hudStar" title="Favourite (F)">&#9734;</button>
+  <div id="hudMain">
+    <b id="hudName"></b>
+    <span id="hudAuthor"></span>
+  </div>
+  <span class="chip" id="hudIndex"></span>
+  <span class="chip" id="hudFormat"></span>
+  <span class="chip" id="hudMode"></span>
+  <span class="chip" id="hudSlide"></span>
+  <span class="chip warn" id="hudWarn" hidden></span>
+  <span class="chip cmp" id="hudCmp" hidden></span>
+  <nav id="rail" aria-label="Slides"></nav>
+  <span id="hudKeys">
+    <kbd>&larr;</kbd><kbd>&rarr;</kbd> theme <kbd>&uarr;</kbd><kbd>&darr;</kbd> slide <kbd>M</kbd> dual <kbd>C</kbd> compare <kbd>G</kbd> grid <kbd>F</kbd> star <kbd>Enter</kbd> fullscreen <kbd>H</kbd> hide <kbd>?</kbd> all keys
+  </span>
+</footer>
+
+<section id="grid" hidden>
+  <header>
+    <input id="q" type="search" placeholder="Search themes, authors, slugs" autocomplete="off" spellcheck="false">
+    <div class="seg" id="fMode">
+      <button data-v="all" class="on">All</button><button data-v="dark">Dark</button><button data-v="light">Light</button>
+    </div>
+    <label class="tog"><input type="checkbox" id="fFav"> Favourites only</label>
+    <label class="sel">Sort
+      <select id="fSort">
+        <option value="name">Name</option>
+        <option value="hue">Accent hue</option>
+        <option value="contrast">Contrast</option>
+        <option value="format">Source format</option>
+      </select>
+    </label>
+    <span id="gCount"></span>
+    <button id="gFavs">Starred list (S)</button>
+    <button id="gClose">Close (Esc)</button>
+  </header>
+  <div id="cards"></div>
+</section>
+
+<section class="modal" id="favModal" hidden>
+  <div class="box">
+    <h2>Starred themes</h2>
+    <p id="favInfo"></p>
+    <textarea id="favText" readonly rows="12" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="favCopy">Copy</button>
+      <button id="favSave">Download .txt</button>
+      <button id="favClear">Clear all</button>
+      <button id="favClose">Close</button>
+    </div>
+  </div>
+</section>
+
+<section class="modal" id="help" hidden>
+  <div class="box">
+    <h2>Keys</h2>
+    <table>
+      <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>J</kbd> <kbd>K</kbd> wheel, swipe, screen edges</td><td>Previous / next theme (follows the grid's filter and sort)</td></tr>
+      <tr><td><kbd>&uarr;</kbd> <kbd>&darr;</kbd> Shift+wheel</td><td>Previous / next slide of this theme</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> <kbd>5</kbd></td><td>Screenshot, wallpapers (press again for the next one), mock desktop, lock screen, palette</td></tr>
+      <tr><td><kbd>W</kbd> / <kbd>Shift+W</kbd></td><td>Next / previous wallpaper, also behind the mock desktop</td></tr>
+      <tr><td><kbd>L</kbd></td><td>Show or hide the launcher and notifications on the mock desktop</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Dual monitor: 1920x1080 landscape beside 1080x1920 portrait</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Compare with the previously viewed theme: side by side, then wipe (move the mouse), then off</td></tr>
+      <tr><td><kbd>X</kbd></td><td>Swap the two compared themes</td></tr>
+      <tr><td><kbd>G</kbd> / <kbd>Esc</kbd></td><td>Overview grid. Type to search, arrows to move, Enter to open</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Star or unstar the theme</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Starred list, copyable</td></tr>
+      <tr><td><kbd>Enter</kbd> / <kbd>F11</kbd></td><td>Browser fullscreen</td></tr>
+      <tr><td><kbd>O</kbd></td><td>Open the original image file in a new tab</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Random theme</td></tr>
+      <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>First / last theme</td></tr>
+      <tr><td><kbd>H</kbd></td><td>Hide or show this bar and the slide rail</td></tr>
+    </table>
+    <p class="dim" id="helpMeta"></p>
+    <div class="row"><button id="helpClose">Close</button></div>
+  </div>
+</section>
+
+<div id="toast" hidden></div>
+
+<script src="data.js"></script>
+<script src="gallery.js"></script>
+</body>
+</html>

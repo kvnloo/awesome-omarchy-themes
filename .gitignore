@@ -1,0 +1,9 @@
+/cache/
+/app/data.js
+/app/img/
+__pycache__/
+*.pyc
+/.work/
+/.lavish/
+.venv/
+.DS_Store

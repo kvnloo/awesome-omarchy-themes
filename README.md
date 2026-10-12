@@ -39,16 +39,19 @@ without running the CLI.
 | Command | Result |
 | --- | --- |
 | `list` | Shallow-clone or update `omacom/omarchy-site` and `omacom/omarchy`; write the catalog to the cache |
+| `discover` | Enumerate curated lists and, with a token, probe GitHub search candidates |
+| `stats` | Cache GitHub stars, forks, dates, issues and archive status |
 | `fetch` | Select and shallow-clone community themes; select built-in themes from the cached Omarchy tree |
 | `palettes` | Read the fetch receipt; write palette, provenance and image job metadata to the cache |
 | `images` | Copy chosen images and generate optional thumbnails in `app/img/` |
 | `data` | Write the gallery's local `app/data.js` script |
 | `check` | Fail if a referenced image is missing or non-local, or an app HTML/CSS/JS source contains an HTTP(S) URL |
-| `all` | Run all six stages above, in order |
+| `all` | Run list, discover, stats, fetch, palettes, images, data and check, in order |
 
 The cache defaults to `./cache`, relative to your current directory. Set
-`THEME_GALLERY_CACHE` or pass `--cache DIR` before or after the command. Output
-always goes to this repository's `app/`. Every browser image reference lives in
+`THEME_GALLERY_CACHE` or pass `--cache DIR` before or after the command.
+Output defaults to this repository's `app/`. Pass `--output DIR` to write a complete
+gallery elsewhere. Every browser image reference lives in
 `app/img/`, so the gallery works with caches in other locations.
 
 The first `list` downloads about 900 MB of catalogue repositories.
@@ -64,7 +67,8 @@ The per-theme cap measures working-tree bytes in MiB, excluding `.git` and
 symlinks. Oversized community clones are removed after cloning. This cap does
 not bound the network transfer or Git metadata. Community clones have a
 60-second timeout; catalogue clones and updates have a 900-second timeout;
-community fetching also skips new work when the theme cache exceeds 6,000 MiB.
+community fetching also skips new work when the theme cache exceeds
+`--cache-max-mb` MiB, which defaults to 6,000. Increase this for larger tiers.
 Previously fetched community repositories are reused; `list` updates the two
 catalog repositories. Failed or oversized themes are recorded as skipped. A
 fetch with no successful themes fails.
@@ -72,6 +76,83 @@ fetch with no successful themes fails.
 The default cache, `app/data.js`, and `app/img/` are git-ignored. If you choose a
 custom cache inside this repository, add that directory to `.gitignore` before
 staging anything. Theme repositories and generated files are not included here.
+
+## Sources, tiers and statistics
+
+The default `curated` tier adds the manual, both awesome-omarchy lists and
+omarchytheme.com to the built-ins and official list. Source memberships are
+merged by canonical repository identity. Themes must pass a palette and layout
+acceptance test; identical palettes keep the built-in, official or curated entry
+first, then the most-starred and oldest repository.
+
+| Tier | Contents | Estimated themes | Estimated full-clone size |
+| --- | --- | --- | --- |
+| `official` | Built-ins and official list | 166 | 4.9 GB |
+| `curated` | Official plus four curated sources | 420 | 12.8 GB |
+| `starred` | Curated plus search results with at least `--min-stars` stars | 630 | 23 GB |
+| `all` | Every accepted search result | 2,150 | 54 GB |
+
+These are estimates after palette de-duplication and the per-theme cap. New
+community sources use lean, sparse clones. `--wallpapers N` limits their copied
+wallpapers to six by default; zero keeps all. The catalog still records their
+full wallpaper, video and application counts. Official themes keep all images.
+
+```sh
+python3 tools/build.py all --tier curated --cache-max-mb 20000
+python3 tools/build.py all --tier starred --min-stars 2 --wallpapers 6
+python3 tools/build.py stats --refresh-stats
+python3 tools/build.py data
+python3 tools/build.py all --cache /path/to/cache --output /path/to/gallery
+```
+
+Tokens are resolved from `GITHUB_TOKEN`, `GH_TOKEN`, then `gh auth token`.
+The token stays in memory and is sent in the GitHub authorization header; it is
+never written to the gallery or cache. Stats are cached with their fetch date for
+`--stats-max-age` days, seven by default. `--refresh-stats` forces a refresh.
+`stats` followed by `data` updates rankings without re-cloning themes.
+`--no-api` disables API use; `--no-search` skips repository search. A missing
+token falls back from `starred` or `all` to `curated`. Failed statistics requests
+produce an empty stats cache and the gallery remains usable.
+
+## Rankings, filters and charts
+
+Popularity is the default. With statistics, its score combines logarithmic stars
+and forks, curated list membership and six-month update recency. Built-ins score
+100. Without statistics it combines lists and commit recency, and star-dependent
+controls disappear. The other rankings are Stars, Trending, Recently updated,
+Newest, Completeness, Wallpapers, Legibility, Colourfulness and Uniqueness.
+Name and Accent hue provide plain ordering. Each ranking has an explanation;
+missing values stay below the No data divider even in reverse order.
+
+Filter kinds combine with AND, and values within a kind combine with OR. Filter
+by mode, accent family, background lightness, contrast, terminal legibility,
+format, licence, source tier, video, wallpaper count, stars, update window,
+author or favourites. Similarity shows the current palette and its 24 nearest
+neighbours. Colour matching uses OKLab distance to accents and terminal colours.
+
+Type filters directly into search, for example:
+
+```text
+mode:light hue:blue,purple con:aa
+stars:10 since:90d sort:trend
+like:tokyo-night
+col:ff79c6
+```
+
+Unknown filter words remain ordinary search text. Active filters are removable,
+and the hash stores their state, for example
+`#tokyo-night/mock?view=grid&sort=trend&mode=dark&hue=blue,purple`.
+Prefix the ranking with `-` to reverse it. Old `sort=contrast` links map to
+Legibility, and `sort=format` maps to Name.
+
+The Stats view follows the same filters. It includes summary numbers, a hue
+wheel, a palette quilt with a true-position toggle, background lightness against
+text contrast, the current ranking's leaderboard, monthly publication counts,
+six terminal colour histograms and accent names. Marks have hover and focus
+tooltips; click a theme to open it, or click an aggregate or brush a region to
+filter the gallery. Every card has a table fallback. Monthly counts require
+GitHub statistics. PCA coordinates, quilt cells and ranking metrics are computed
+at build time; charts bin and count the current slice locally.
 
 ## Keys
 
@@ -93,9 +174,19 @@ staging anything. Theme repositories and generated files are not included here.
 | R | Random theme |
 | Home / End | First / last filtered theme |
 | H | Hide or show the HUD |
+| V | Toggle Stats from fullscreen |
+| T / Shift+T | Next / previous ranking from fullscreen |
+| A | Show the current palette and its nearest neighbours |
+| E | Match a hex colour |
+| I | Toggle theme information and score details |
+| 0 | Clear all filters |
 | ? | Help |
 
-In the grid, type to search and use arrows and Enter to select. Esc closes
+In the grid, type to search and use arrows and Enter to select. Tab follows the
+filter controls. In Stats, Tab and arrows navigate charts and marks, Enter opens
+a theme or applies a selection, T toggles the table, and Escape closes Stats.
+On the leaderboard, T cycles rankings and Shift+T toggles its table. V also
+closes Stats. Esc closes
 modals. Wheel, horizontal swipes and screen edges change themes; Shift+wheel
 and vertical swipes change slides. Clicking a palette swatch copies its hex
 colour. Favourites and HUD visibility use localStorage when available.

@@ -23,6 +23,7 @@
     <span id="hudAuthor"></span>
   </div>
   <span class="chip" id="hudIndex"></span>
+  <span class="chip" id="hudRank"></span>
   <span class="chip" id="hudFormat"></span>
   <span class="chip" id="hudMode"></span>
   <span class="chip" id="hudSlide"></span>
@@ -34,26 +35,30 @@
   </span>
 </footer>
 
-<section id="grid" hidden>
-  <header>
-    <input id="q" type="search" placeholder="Search themes, authors, slugs" autocomplete="off" spellcheck="false">
+<section id="stats" hidden aria-label="Theme statistics">
+  <div class="stats-heading"><div><p class="eyebrow">OMARCHY / PALETTE ATLAS</p><h1>Theme statistics</h1></div><div class="stats-actions"><span id="statsCount"></span><button id="statsGrid">Show in grid</button><button id="statsClose">Close (Esc)</button></div></div>
+  <div id="statsToolbar"></div>
+  <div id="statsCards"></div>
+</section>
+<section id="grid" hidden aria-label="Theme gallery">
+  <header id="galleryToolbar">
+    <input id="q" type="search" placeholder="Search or type hue:blue con:aa stars:10" aria-label="Search themes and filters" autocomplete="off" spellcheck="false">
     <div class="seg" id="fMode">
       <button data-v="all" class="on">All</button><button data-v="dark">Dark</button><button data-v="light">Light</button>
     </div>
     <label class="tog"><input type="checkbox" id="fFav"> Favourites only</label>
     <label class="sel">Sort
-      <select id="fSort">
-        <option value="name">Name</option>
-        <option value="hue">Accent hue</option>
-        <option value="contrast">Contrast</option>
-        <option value="format">Source format</option>
-      </select>
+      <select id="fSort" aria-label="Ranking"></select>
     </label>
     <span id="gCount"></span>
+    <button id="gStats">Stats (V)</button>
     <button id="gFavs">Starred list (S)</button>
     <button id="gClose">Close (Esc)</button>
+    <span id="sortExplanation"></span>
+    <details id="filterDetails"><summary>More filters</summary><div id="filterControls"></div></details>
+    <div id="activeFilters" aria-label="Active filters"></div>
   </header>
-  <div id="cards"></div>
+  <div id="cards" tabindex="-1"></div>
 </section>
 
 <section class="modal" id="favModal" hidden>
@@ -89,6 +94,11 @@
       <tr><td><kbd>O</kbd></td><td>Open the original image file in a new tab</td></tr>
       <tr><td><kbd>R</kbd></td><td>Random theme</td></tr>
       <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>First / last theme</td></tr>
+      <tr><td><kbd>V</kbd></td><td>Open or close statistics. Tab visits charts; arrows visit marks; T shows a chart's table. On the leaderboard, T cycles rankings and Shift+T shows its table.</td></tr>
+      <tr><td><kbd>T</kbd> / <kbd>Shift+T</kbd></td><td>Next / previous ranking in fullscreen</td></tr>
+      <tr><td><kbd>A</kbd> / <kbd>E</kbd></td><td>Find similar palettes / match a colour</td></tr>
+      <tr><td><kbd>I</kbd> / <kbd>0</kbd></td><td>Theme information / clear filters</td></tr>
+      <tr><td>Typed filters</td><td>hue:blue,purple con:aa fmt:4x stars:10 since:90d by:author sort:trend. Press Space or Enter to apply a filter. Bare words remain search text.</td></tr>
       <tr><td><kbd>H</kbd></td><td>Hide or show this bar and the slide rail</td></tr>
     </table>
     <p class="dim" id="helpMeta"></p>
@@ -96,7 +106,10 @@
   </div>
 </section>
 
-<div id="toast" hidden></div>
+<aside id="themeInfo" hidden aria-label="Theme information"></aside>
+<div id="chartTooltip" role="tooltip" hidden></div>
+<section class="modal" id="colourModal" hidden><div class="box"><h2>Match a colour</h2><p>Find palettes with a similar accent or terminal colour.</p><div class="row"><input id="colourPicker" type="color" value="#7aa2f7" aria-label="Colour"><input id="colourHex" value="7aa2f7" maxlength="7" pattern="#?[A-Fa-f0-9]{6}" aria-label="Hex colour"><button id="colourApply">Find themes</button><button id="colourClose">Close</button></div></div></section>
+<div id="toast" role="status" hidden></div>
 
 <script src="data.js"></script>
 <script src="gallery.js"></script>

@@ -16,6 +16,7 @@ import sys
 import time
 import tomllib
 import warnings
+import urllib.request
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -703,13 +704,19 @@ def resolve_token():
     return None
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def github_graphql(query, token):
     request = Request('https://api.github.com/graphql', data=json.dumps({'query': query}).encode(),
                       headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
                                'User-Agent': 'omarchy-theme-gallery'})
+    opener = urllib.request.build_opener(NoRedirect)
     for attempt in range(3):
         try:
-            with urlopen(request, timeout=30) as response:
+            with opener.open(request, timeout=30) as response:
                 result = json.load(response)
             break
         except HTTPError as error:
@@ -774,7 +781,7 @@ def stats_row(node):
 def discover(cache, no_search=False, no_api=False, max_age=7, refresh=False):
     catalog = read_json(cache / 'list.json')
     candidates = {}
-    def add(url, list_id, pos=None, name=None, site_image=None):
+    def add(url, list_id, pos=None, name=None, site_image=None, slug=None):
         identity = repo_identity(url)
         if not identity:
             return
@@ -788,13 +795,15 @@ def discover(cache, no_search=False, no_api=False, max_age=7, refresh=False):
             row['lists'].append(list_id)
         if pos is not None:
             row['official_pos'] = pos
+        if slug:
+            row['slug'] = slug
         if name:
             row['name'] = name
         if site_image:
             row['site_image'] = site_image
         row['tier'] = 'official' if 'official' in row['lists'] else 'curated' if any(x in CURATED_LISTS for x in row['lists']) else 'found'
     for pos, row in enumerate(catalog['community'], 1):
-        add(row['repo'], 'official', row.get('official_pos', pos), row.get('name'), row.get('site_image'))
+        add(row['repo'], 'official', row.get('official_pos', pos), row.get('name'), row.get('site_image'), row.get('slug'))
     for list_id, name in [('awesome-a', 'aorumbayev/awesome-omarchy'),
                            ('awesome-w', 'Wheel-Smith/awesome-omarchy'),
                            ('hub-l', 'limehawk/omarchy-theme-website')]:
@@ -1061,16 +1070,17 @@ def dedupe_themes(themes):
         tier = 0 if theme.get('builtin') else 1 if theme.get('tier') == 'official' or 'official' in lists else 2 if theme.get('tier') == 'curated' or any(x in CURATED_LISTS for x in lists) else 3
         row = theme.get('stats') or theme.get('st') or {}
         return tier, -row.get('stars', row.get('s', 0)), row.get('created', row.get('c')) or '9999', theme['slug']
-    kept, duplicates, keys = [], [], {}
+    duplicates, keys = [], {}
     for theme in sorted(themes, key=priority):
         bg, fg, accent, normal, bright = palette_fields(theme)
         key = tuple([bg, fg] + normal + bright)
+        theme.pop('twin_of', None)
         if key in keys:
+            theme['twin_of'] = keys[key]['slug']
             duplicates.append(dict(slug=theme['slug'], name=theme.get('name'), repo=theme.get('repo'), duplicate_of=keys[key]['slug']))
         else:
             keys[key] = theme
-            kept.append(theme)
-    return sorted(kept, key=lambda theme: theme['slug']), sorted(duplicates, key=lambda theme: theme['slug'])
+    return sorted(themes, key=lambda theme: theme['slug']), sorted(duplicates, key=lambda theme: theme['slug'])
 
 
 def merge_candidates(rows):
@@ -1088,7 +1098,7 @@ def merge_candidates(rows):
         current['queried_as'] = list(dict.fromkeys(current['queried_as'] + row.get('queried_as', [])))
         if row.get('official_pos') is not None and (current.get('official_pos') is None or row['official_pos'] < current['official_pos']):
             current.update(official_pos=row['official_pos'])
-            for field in ('name', 'site_image'):
+            for field in ('name', 'site_image', 'slug'):
                 if row.get(field):
                     current[field] = row[field]
         if row.get('accepted') is not None:
@@ -1122,6 +1132,7 @@ def catalog_entries(catalog, candidates=None, stats_data=None, tier='curated', m
         return (group, row.get('official_pos') or math.inf if group == 0 else
                 -len(set(row.get('lists', [])) & set(CURATED_LISTS)) if group == 1 else -stars(row),
                 (row.get('name') or row['repo']).lower())
+    official = {row.get('official_pos', i): row for i, row in enumerate(catalog['community'], 1)}
     used = set(catalog['builtin'])
     for row in sorted(candidates, key=ordering):
         if row.get('accepted') is False:
@@ -1135,14 +1146,22 @@ def catalog_entries(catalog, candidates=None, stats_data=None, tier='curated', m
         if not identity:
             continue
         author, repo = identity[1].split('/', 1)
-        slug = re.sub(r'[^a-z0-9._-]+', '-', repo.lower())
+        original = repo_identity((row.get('queried_as') or [row['repo']])[0])
+        original_author, original_repo = original[1].split('/', 1) if original else (author, repo)
+        slug = re.sub(r'[^a-z0-9._-]+', '-', original_repo.lower())
         slug = re.sub(r'^omarchy-', '', slug)
         slug = re.sub(r'-theme$', '', slug)
-        slug = re.sub(r'^theme-', '', slug) or repo.lower()
+        slug = re.sub(r'^theme-', '', slug)
+        base = slug if slug and slug not in ('theme', 'omarchy') else original_repo.lower()
+        slug = slug or original_repo.lower()
+        if row.get('official_pos') is not None:
+            slug = (official.get(row['official_pos']) or row).get('slug') or slug
         if slug in used:
-            slug += '-' + re.sub(r'[^a-z0-9]+', '-', author.lower())
+            slug += '-' + re.sub(r'[^a-z0-9]+', '-', original_author.lower())
+        while slug in used:
+            slug += '-2'
         used.add(slug)
-        entries.append(dict(slug=slug, name=row.get('name') or ' '.join(w.capitalize() for w in slug.split('-')),
+        entries.append(dict(slug=slug, name=row.get('name') or ' '.join(w.capitalize() for w in base.split('-')),
             author=author, repo=row['repo'], builtin=False, commit=None, site_image=row.get('site_image'),
             tier=row_tier, lists=row.get('lists', []), official_pos=row.get('official_pos')))
     return entries
@@ -1338,9 +1357,6 @@ def palettes(cache):
         pals[entry['slug']] = dict(name=entry['name'], **pal)
         jobs.append(job)
     index, duplicates = dedupe_themes(index)
-    slugs = {theme['slug'] for theme in index}
-    pals = {slug: pal for slug, pal in pals.items() if slug in slugs}
-    jobs = [job for job in jobs if job['slug'] in slugs]
     viz = metrics(index, stats_data)
     for theme in index:
         del theme['palette']
@@ -1562,7 +1578,7 @@ def data(cache, app=APP):
             thumb=im['thumb'], wthumb=im.get('wthumb'), previews=im['previews'], walls=im['walls'],
             hue=pal['accent_hue'], sat=pal['accent_saturation'], contrast=pal['contrast_fg_bg'],
             tier=theme.get('tier', 'builtin' if theme['builtin'] else 'official'), ls=theme.get('lists', []),
-            pos=theme.get('official_pos'), st=st, lc=theme.get('last_commit'),
+            pos=theme.get('official_pos'), st=st, lc=theme.get('last_commit'), tw=theme.get('twin_of'),
             licc=licence_category(detected, bool(theme['licence_file'])),
             wn=theme.get('wallpapers_count', len(theme['wallpapers'])), wmp=round(wmp, 2),
             apps=theme.get('apps', []), m=theme['m'], r=theme['r'],

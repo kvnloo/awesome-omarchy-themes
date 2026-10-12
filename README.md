@@ -82,18 +82,21 @@ staging anything. Theme repositories and generated files are not included here.
 The default `curated` tier adds the manual, both awesome-omarchy lists and
 omarchytheme.com to the built-ins and official list. Source memberships are
 merged by canonical repository identity. Themes must pass a palette and layout
-acceptance test; identical palettes keep the built-in, official or curated entry
-first, then the most-starred and oldest repository.
+acceptance test. Every theme is retained, including identical palettes. Lower-priority
+palette twins carry a "same palette as X" badge, favouring built-in, official and
+curated entries, then the most-starred and oldest repository. The Twins chip starts
+with twins shown; toggle it to hide them, or type `twins:hide`.
 
-| Tier | Contents | Estimated themes | Estimated full-clone size |
+| Tier | Contents | Earlier theme estimate | Estimated full-clone size |
 | --- | --- | --- | --- |
 | `official` | Built-ins and official list | 166 | 4.9 GB |
 | `curated` | Official plus four curated sources | 420 | 12.8 GB |
 | `starred` | Curated plus search results with at least `--min-stars` stars | 630 | 23 GB |
 | `all` | Every accepted search result | 2,150 | 54 GB |
 
-These are estimates after palette de-duplication and the per-theme cap. New
-community sources use lean, sparse clones. `--wallpapers N` limits their copied
+These earlier estimates excluded palette twins and applied the per-theme cap.
+Current builds retain twins, so totals can be higher. New community sources use
+lean, sparse clones. `--wallpapers N` limits their copied
 wallpapers to six by default; zero keeps all. The catalog still records their
 full wallpaper, video and application counts. Official themes keep all images.
 
@@ -107,8 +110,11 @@ python3 tools/build.py all --cache /path/to/cache --output /path/to/gallery
 
 Tokens are resolved from `GITHUB_TOKEN`, `GH_TOKEN`, then `gh auth token`.
 The token stays in memory and is sent in the GitHub authorization header; it is
-never written to the gallery or cache. Stats are cached with their fetch date for
-`--stats-max-age` days, seven by default. `--refresh-stats` forces a refresh.
+never written to the gallery or cache. Authorization-bearing requests refuse
+redirects. Official slugs retain the list identity; other slugs follow the first
+queried repository URL, so API renames do not change favourites or links.
+Stats are cached with their fetch date for `--stats-max-age` days, seven by
+default. `--refresh-stats` forces a refresh.
 `stats` followed by `data` updates rankings without re-cloning themes.
 `--no-api` disables API use; `--no-search` skips repository search. A missing
 token falls back from `starred` or `all` to `curated`. Failed statistics requests
@@ -128,7 +134,9 @@ Filter kinds combine with AND, and values within a kind combine with OR. Filter
 by mode, accent family, background lightness, contrast, terminal legibility,
 format, licence, source tier, video, wallpaper count, stars, update window,
 author or favourites. Similarity shows the current palette and its 24 nearest
-neighbours. Colour matching uses OKLab distance to accents and terminal colours.
+neighbours. Colour matching uses OKLab distance to accents and terminal colours, keeps
+matches within 8 distance units, and caps the result at the 48 nearest themes.
+If fewer than twelve match, it shows the best twelve from the filtered set.
 
 Type filters directly into search, for example:
 
@@ -148,8 +156,9 @@ Legibility, and `sort=format` maps to Name.
 The Stats view follows the same filters. It includes summary numbers, a hue
 wheel, a palette quilt with a true-position toggle, background lightness against
 text contrast, the current ranking's leaderboard, monthly publication counts,
-six terminal colour histograms and accent names. Marks have hover and focus
-tooltips; click a theme to open it, or click an aggregate or brush a region to
+six terminal colour histograms and every accent name in the selection. Built-ins
+are left out of the popularity leaderboard and outlined in the palette quilt.
+Marks have hover and focus tooltips; click a theme to open it, or click an aggregate or brush a region to
 filter the gallery. Every card has a table fallback. Monthly counts require
 GitHub statistics. PCA coordinates, quilt cells and ranking metrics are computed
 at build time; charts bin and count the current slice locally.

@@ -286,29 +286,28 @@ button:focus-visible, select:focus-visible, summary:focus-visible, input:focus-v
 .stats-actions { display: flex; align-items: center; gap: 10px; color: var(--viz-ink2); font-size: 12px; }
 #stats #gStats, #stats #gClose, #stats #gFavs { display: none; }
 #stats #galleryToolbar { padding-left: 32px; padding-right: 32px; }
-#statsCards { display: grid; grid-template-columns: 1fr; gap: 20px; padding: 24px 32px 32px; align-items: start; }
-.viz-card { min-width: 0; background: var(--viz-surface); border: 1px solid #ffffff0c; border-radius: 12px; padding: 20px; }
+#statsCards { columns: 1; column-gap: 20px; padding: 24px 32px 32px; align-items: start; }
+.viz-card { break-inside: avoid; margin-bottom: 20px; min-width: 0; background: var(--viz-surface); border: 1px solid #ffffff0c; border-radius: 12px; padding: 20px; }
 .viz-card:focus-visible { outline: 2px solid var(--viz-s1); outline-offset: 3px; }
 .viz-head { display: flex; align-items: center; gap: 10px; }
 .viz-head h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.2px; flex: 1; }
 .viz-card .table-toggle, .viz-card .quilt-toggle { font-size: 11px; min-height: 27px; background: transparent; color: var(--viz-ink2); }
 .viz-caption { font-size: 12px; color: var(--viz-muted); margin: 8px 0 12px; line-height: 1.5; max-width: 90%; }
-.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; user-select: none; }
 .chart-svg text { font-family: var(--sans); fill: var(--viz-ink2); font-size: 11px; }
 .chart-svg .axis-label { fill: var(--viz-muted); font-size: 11px; }
 .chart-svg .theme-label, .chart-svg .value-label { fill: var(--viz-ink); font-size: 12px; }
-.chart-svg .landmark-label { fill: var(--viz-ink2); font-size: 9px; paint-order: stroke; stroke: var(--viz-surface); stroke-width: 3px; }
 .chart-svg .family-label { fill: var(--viz-ink2); font-size: 12px; }
 .chart-svg [data-mark] { cursor: pointer; outline: none; }
 .chart-svg [data-mark]:hover, .chart-svg [data-mark]:focus { filter: brightness(1.2); }
 .chart-svg [data-mark]:focus-visible { outline: 2px solid var(--viz-s1); outline-offset: 3px; }
-.number-tiles { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; padding-top: 12px; }
+.number-tiles { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding-top: 12px; }
 .number-tile { min-width: 0; display: flex; flex-direction: column; text-align: left; align-items: flex-start; gap: 5px; border: 0 !important; border-radius: 8px; background: #ffffff03 !important; padding: 14px 12px !important; width: 100%; height: 100%; }
 .number-tile span { color: var(--viz-ink2); font-size: 11px; }
 .number-tile strong { color: var(--viz-ink); font-size: 22px; font-weight: 600; letter-spacing: -.5px; font-variant-numeric: proportional-nums; }
 .number-tile small { color: var(--viz-muted); font-size: 10px; }
 .number-tile.hero-number strong { font-size: 48px; letter-spacing: -1.5px; line-height: 1.05; }
-.number-tile.hero-number { grid-column: span 2; grid-row: span 2; justify-content: center; }
+.number-tile.hero-number { grid-row: span 2; justify-content: center; }
 .mode-tile { position: relative; }
 .mode-tile .number-tile { padding-bottom: 36px !important; }
 .mode-tile .light-tile-link { position: absolute; bottom: 5px; left: 5px; min-height: 24px; border: 0; background: transparent; font-size: 10px; color: var(--viz-muted); }
@@ -331,7 +330,7 @@ button:focus-visible, select:focus-visible, summary:focus-visible, input:focus-v
 #chartTooltip span { margin-top: 3px; color: var(--viz-ink2); }
 .tooltip-palette { display: flex; height: 5px; margin-top: 8px; border-radius: 2px; overflow: hidden; }
 .tooltip-palette i { flex: 1; box-shadow: inset 0 0 0 1px var(--viz-axis); }
-@media (min-width: 1280px) { #statsCards { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (min-width: 1280px) { #statsCards { columns: 2; } }
 @media (max-width: 700px) {
   .stats-heading { padding: 20px 16px 12px; align-items: flex-start; flex-direction: column; gap: 12px; }
   .stats-heading h1 { font-size: 24px; }
@@ -340,7 +339,11 @@ button:focus-visible, select:focus-visible, summary:focus-visible, input:focus-v
   .viz-card { padding: 14px; }
   .viz-caption { max-width: 100%; }
   .number-tiles { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .number-tile.hero-number { grid-row: auto; }
   #gCount { margin-left: 0; }
   #galleryToolbar { gap: 8px; }
   #filterDetails[open] { max-height: 35vh; overflow: auto; }
 }
+
+.card .bd { right: 6px; flex-wrap: wrap; }
+.twin-badge { color: var(--viz-ink2); font-size: 10px; overflow-wrap: anywhere; }

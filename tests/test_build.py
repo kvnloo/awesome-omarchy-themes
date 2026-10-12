@@ -636,6 +636,31 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
         self.assertEqual(value['explicitFilters'], {'stars': '10'})
         self.assertEqual(value['hue'], 359)  # Keep the pre-existing HSV ordering.
 
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed to exercise gallery filters')
+    def test_gallery_colour_cap_fallback_and_twins_filter(self):
+        script = r"""
+const fs = require('fs'), vm = require('vm');
+const themes = Array.from({length:70}, (_, i) => ({slug:'theme-'+i, name:'Theme '+String(i).padStart(2,'0'),
+  p:{ac:'#ff79c6',n:Array(8).fill('#ff79c6'),b:Array(8).fill('#ff79c6')},tw:i<19?'theme-69':null,
+  format:i<6?'4.x colors.toml':'legacy per-app files',author:'Fixture'}));
+const window = {GALLERY:{themes,stats:{source:'github-graphql'}}};
+const document = {createElement:() => ({style:{},dataset:{}})};
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const prefix = source.slice(0,source.indexOf('  /* ---------- shared chart anatomy and interactions ---------- */'));
+vm.runInNewContext(prefix+'\nwindow.test={pipeline,qualifies,validFilter};})();',{window,document});
+const {pipeline,qualifies,validFilter}=window.test;
+console.log(JSON.stringify({cap:pipeline({col:'ff79c6',sort:'similar'}).length,
+  fallback:pipeline({col:'000000',sort:'similar'}).length,
+  narrowed:pipeline({col:'000000',fmt:'4x',sort:'similar'}).length,
+  shown:themes.filter(t=>qualifies(t,{})).length,
+  hidden:themes.filter(t=>qualifies(t,{twins:'hide'})).length,
+  valid:validFilter('twins','hide'),invalid:validFilter('twins','bogus')}));
+"""
+        result = subprocess.run(['node', '-e', script, str(ROOT / 'app/gallery.js')],
+                                capture_output=True, text=True, check=True, timeout=5)
+        self.assertEqual(json.loads(result.stdout), dict(cap=48, fallback=12, narrowed=6,
+                         shown=70, hidden=51, valid='hide', invalid=''))
+
     def setUp(self):
         (ROOT / '.work').mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / '.work')
@@ -846,13 +871,16 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
         for winner, loser in pairs:
             with self.subTest(winner=winner['slug'], loser=loser['slug']):
                 kept, duplicates = build.dedupe_themes([loser, winner])
-                self.assertEqual([t['slug'] for t in kept], [winner['slug']])
+                self.assertEqual({t['slug'] for t in kept}, {winner['slug'], loser['slug']})
+                self.assertEqual(loser['twin_of'], winner['slug'])
+                self.assertNotIn('twin_of', winner)
                 self.assertEqual([(t['slug'], t['duplicate_of']) for t in duplicates],
                                  [(loser['slug'], winner['slug'])])
         changed = record('changed-accent', 'found')
         changed['palette']['accent'] = '#00ff00'
         kept, _ = build.dedupe_themes([record('builtin', 'builtin'), changed])
-        self.assertEqual(len(kept), 1, 'accent is deliberately excluded from the duplicate key')
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(changed['twin_of'], 'builtin', 'accent is excluded from the duplicate key')
         changed['palette']['bright'][7] = '#112233'
         self.assertEqual(len(build.dedupe_themes([record('builtin', 'builtin'), changed])[0]), 2)
 
@@ -976,7 +1004,7 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
     def test_graphql_token_only_in_authorization_header(self):
         marker = 'ghp_' + 'headerMarker' * 3
         payload = io.BytesIO(json.dumps({'data': {'result': 1}}).encode())
-        with patch.object(build, 'urlopen', return_value=contextlib.closing(payload)) as network:
+        with patch.object(build.urllib.request.OpenerDirector, 'open', return_value=contextlib.closing(payload)) as network:
             self.assertEqual(build.github_graphql('query { viewer { login } }', marker), {'result': 1})
         request = network.call_args.args[0]
         self.assertEqual(request.full_url, 'https://api.github.com/graphql')
@@ -984,6 +1012,47 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
         self.assertEqual(request.get_header('Authorization'), 'Bearer ' + marker)
         self.assertNotIn(marker, request.full_url)
         self.assertNotIn(marker.encode(), request.data)
+
+    def test_graphql_refuses_redirects_with_authorization(self):
+        from email.message import Message
+        from urllib.response import addinfourl
+        headers = Message()
+        headers['Location'] = 'https://other.example/collect'
+        requests = []
+        class RedirectResponse(build.urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                requests.append(request)
+                response = addinfourl(io.BytesIO(b''), headers, request.full_url, 302)
+                response.msg = 'Found'
+                return response
+        opener = build.urllib.request.build_opener(build.NoRedirect, RedirectResponse())
+        with patch.object(build.urllib.request, 'build_opener', return_value=opener), \
+             self.assertRaises(build.HTTPError) as raised:
+            build.github_graphql('query { viewer { login } }', 'marker-token')
+        self.assertEqual(raised.exception.code, 302)
+        raised.exception.close()
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0].full_url, 'https://api.github.com/graphql')
+
+    def test_catalog_preserves_official_and_queried_slugs_and_clean_names(self):
+        catalog = dict(builtin=['dracula', 'dracula-owner'], community=[dict(
+            slug='venice-from-above-omarchy', repo='https://github.com/mattbbia/venice-from-above-omarchy',
+            name='Venice from Above', official_pos=142)])
+        candidates = [dict(repo='https://github.com/mattbbia/venice-from-above',
+            queried_as=['https://github.com/mattbbia/venice-from-above-omarchy'],
+            official_pos=142, tier='official', lists=['official']),
+            dict(repo='https://github.com/owner/omarchy-dracula-theme', tier='curated', lists=['manual']),
+            dict(repo='https://github.com/owner/renamed', queried_as=['https://github.com/owner/omarchy-original-theme'],
+                 tier='curated', lists=['manual']),
+            dict(repo='https://github.com/owner/omarchy-theme', tier='curated', lists=['manual'])]
+        entries = build.catalog_entries(catalog, candidates=candidates)
+        by_repo = {entry['repo']: entry for entry in entries if not entry['builtin']}
+        self.assertEqual(by_repo[candidates[0]['repo']]['slug'], 'venice-from-above-omarchy')
+        self.assertEqual(by_repo[candidates[1]['repo']]['slug'], 'dracula-owner-2')
+        self.assertEqual(by_repo[candidates[1]['repo']]['name'], 'Dracula')
+        self.assertEqual(by_repo[candidates[2]['repo']]['slug'], 'original')
+        self.assertEqual(by_repo[candidates[2]['repo']]['name'], 'Original')
+        self.assertEqual(by_repo[candidates[3]['repo']]['name'], 'Omarchy Theme')
 
     def test_canonical_repository_merge_retains_curation_and_position(self):
         rows = [
@@ -1053,7 +1122,7 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
 
     def test_discover_merges_api_renames_and_rejects_forks(self):
         build.write_json(self.root / 'list.json', dict(builtin=[], community=[
-            dict(repo='https://github.com/example/old-name', name='Official title', official_pos=7),
+            dict(repo='https://github.com/example/old-name', slug='old-name', name='Official title', official_pos=7),
             dict(repo='https://github.com/example/fork', name='Fork', official_pos=8)]))
         def clone(cache, url, dest, **kwargs):
             dest.mkdir(parents=True)
@@ -1082,6 +1151,7 @@ console.log(JSON.stringify({matches, sequences, explicit, explicitFilters:S.filt
         self.assertEqual(renamed['official_pos'], 7)
         self.assertTrue(renamed['accepted'])
         self.assertEqual(renamed['name'], 'Official title')
+        self.assertEqual(renamed['slug'], 'old-name')
         rejected = next(row for row in rows if row['repo'].endswith('/fork'))
         self.assertFalse(rejected['accepted'])
         self.assertEqual(rejected['reason'], 'fork')
